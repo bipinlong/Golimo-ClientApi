@@ -798,3 +798,202 @@ exports.updateBooking = (req, res) => {
     });
 };
 
+// ✅ New function - Get max bookingId and increment by 1
+const generateBookingId = async () => {
+  return new Promise((resolve, reject) => {
+    // Get the maximum bookingId (converted to number)
+    conn.query("SELECT bookingId FROM bookings ORDER BY CAST(bookingId AS UNSIGNED) DESC LIMIT 1", (err, results) => {
+      if (err) {
+        console.error("Error fetching max bookingId:", err);
+        // Fallback to timestamp-based ID
+        const fallbackId = Date.now().toString();
+        return resolve(fallbackId);
+      }
+      
+      let newId;
+      if (results && results.length > 0 && results[0].bookingId) {
+        // Get max ID and increment by 1
+        const maxId = parseInt(results[0].bookingId, 10);
+        newId = (maxId + 1).toString();
+      }
+      
+      console.log("📊 Generated Booking ID:", newId);
+      resolve(newId);
+    });
+  });
+};
+
+// Guest booking handler
+const handleGuestShuttleBooking = (bookingData, res) => {
+  const {
+    firstName, lastName, email, phone, bookingId, combinedData,
+    paymentDetails, userType, bookActionType, billingContact, tenant_id
+  } = bookingData;
+
+  const insertSql = `
+    INSERT INTO bookings (
+      bookingId, firstName, lastName, email, phone, orderData,
+      paymentdetails, userType, bookActionType,
+      billingContact, orderStatus, createdAt, tenant_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', NOW(), ?)
+  `;
+
+  const values = [
+    bookingId, firstName, lastName, email, phone,
+    JSON.stringify(combinedData), JSON.stringify(paymentDetails),
+    userType, bookActionType, JSON.stringify(billingContact),
+    tenant_id
+  ];
+
+  conn.query(insertSql, values, (err, result) => {
+    if (err) {
+      console.error("Error inserting guest shuttle booking:", err);
+      return res.status(500).json({ error: "Failed to create booking", details: err.message });
+    }
+    res.status(201).json({
+      success: true,
+      message: "Shuttle booking created successfully",
+      bookingId: bookingId
+    });
+  });
+};
+
+// Registered user booking handler
+const createShuttleBooking = (bookingData, res) => {
+  const {
+    accountnumber, firstName, lastName, email, phone, bookingId,
+    combinedData, paymentDetails, userType, bookActionType,
+    billingContact, tenant_id
+  } = bookingData;
+
+  const insertSql = `
+    INSERT INTO bookings (
+      bookingId, accountnumber, firstName, lastName, email, phone,
+      orderData, paymentdetails, userType, bookActionType,
+      billingContact, orderStatus, createdAt, tenant_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', NOW(), ?)
+  `;
+
+  const values = [
+    bookingId, accountnumber, firstName, lastName, email, phone,
+    JSON.stringify(combinedData), JSON.stringify(paymentDetails),
+    userType, bookActionType, JSON.stringify(billingContact),
+    tenant_id
+  ];
+
+  conn.query(insertSql, values, (err, result) => {
+    if (err) {
+      console.error("Error inserting shuttle booking:", err);
+      return res.status(500).json({ error: "Failed to create booking", details: err.message });
+    }
+    res.status(201).json({
+      success: true,
+      message: "Shuttle booking created successfully",
+      bookingId: bookingId
+    });
+  });
+};
+
+// MAIN EXPORT - addShuttleBooking
+// MAIN EXPORT - addShuttleBooking
+exports.addShuttleBooking = async (req, res) => {
+  try {
+    const {
+      accountnumber,
+      firstName,
+      lastName,
+      email,
+      phone,
+      combinedData,
+      paymentDetails,
+      userType,
+      bookActionType,
+      billingContact
+    } = req.body;
+
+    // Get tenant_id from request (from middleware)
+    const tenant_id = req.tenantId || req.user?.tenant_id || null;
+
+    console.log("🔄 Shuttle Booking Request:", { userType, email, firstName, tenant_id });
+
+    // ✅ Generate sequential booking ID (max+1)
+    const bookingId = await generateBookingId();
+
+    const bookingData = {
+      accountnumber,
+      firstName,
+      lastName,
+      email,
+      phone,
+      bookingId,
+      combinedData,
+      paymentDetails,
+      userType,
+      bookActionType,
+      billingContact,
+      tenant_id
+    };
+
+    if (userType === "guest") {
+      handleGuestShuttleBooking(bookingData, res);
+    } else if (["registered", "agent", "affiliate"].includes(userType)) {
+      createShuttleBooking(bookingData, res);
+    } else {
+      return res.status(400).json({ error: "Invalid userType provided" });
+    }
+  } catch (error) {
+    console.error("Error in addShuttleBooking:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+// Get all shuttle bookings (filter by serviceType)
+// exports.getAllShuttleBookings = (req, res) => {
+//   let sql = `SELECT * FROM bookings WHERE JSON_EXTRACT(orderData, '$.serviceType') LIKE '%Shuttle%' ORDER BY createdAt DESC`;
+//   let params = [];
+
+//   if (req.tenantId) {
+//     sql = `SELECT * FROM bookings WHERE tenant_id = ? AND JSON_EXTRACT(orderData, '$.serviceType') LIKE '%Shuttle%' ORDER BY createdAt DESC`;
+//     params = [req.tenantId];
+//   }
+
+//   conn.query(sql, params, (err, results) => {
+//     if (err) {
+//       console.error("Error fetching shuttle bookings:", err);
+//       return res.status(500).json({ error: "Failed to fetch bookings" });
+//     }
+//     res.status(200).json({ success: true, bookings: results });
+//   });
+// };
+
+// // Get shuttle booking by ID
+// exports.getShuttleBookingById = (req, res) => {
+//   const { id } = req.params;
+//   const sql = "SELECT * FROM bookings WHERE (id = ? OR bookingId = ?) AND JSON_EXTRACT(orderData, '$.serviceType') LIKE '%Shuttle%'";
+  
+//   conn.query(sql, [id, id], (err, results) => {
+//     if (err) {
+//       console.error("Error fetching shuttle booking:", err);
+//       return res.status(500).json({ error: "Failed to fetch booking" });
+//     }
+//     if (results.length === 0) {
+//       return res.status(404).json({ error: "Shuttle booking not found" });
+//     }
+//     res.status(200).json({ success: true, booking: results[0] });
+//   });
+// };
+
+// // Update shuttle booking status
+// exports.updateShuttleBookingStatus = (req, res) => {
+//   const { bookingId, orderStatus } = req.body;
+//   const sql = "UPDATE bookings SET orderStatus = ? WHERE bookingId = ?";
+  
+//   conn.query(sql, [orderStatus, bookingId], (err, result) => {
+//     if (err) {
+//       console.error("Error updating shuttle booking status:", err);
+//       return res.status(500).json({ error: "Failed to update status" });
+//     }
+//     res.status(200).json({ success: true, message: "Status updated successfully" });
+//   });
+// };
+
