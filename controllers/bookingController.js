@@ -99,7 +99,8 @@ exports.addBooking = async (req, res) => {
             userType,
             bookActionType,
             bookingTime,
-            billingContact
+            billingContact,
+            tenant_id 
         } = req.body;
 
         console.log(bookingTime, "booking time")
@@ -126,6 +127,7 @@ exports.addBooking = async (req, res) => {
                 bookingTime,
                 billingContact,
                 res,
+                tenant_id ,
             });
         } else {
             return res.status(400).json({ error: "Invalid userType provided" });
@@ -154,7 +156,8 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
             bookActionType,
             bookingTime,
             billingContact,
-            res
+            res,
+            tenant_id,
         });
     } catch (error) {
         console.error("Error in handleGuestBooking:", error);
@@ -162,7 +165,8 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
     }
 }
 
-  async function createBooking({
+
+async function createBooking({
     bookingId,
     accountnumber,
     firstName,
@@ -177,18 +181,65 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
     userType,
     bookingTime,
     billingContact,
-    res
+    res,
+    tenant_id,
 }) {
     try {
         console.log("Processing bookActionType in createBooking:", bookActionType);
 
+        // ✅ FIX 1: Parse combinedData if it's a string
+        let parsedCombinedData = combinedData;
+        if (typeof combinedData === 'string') {
+            try {
+                parsedCombinedData = JSON.parse(combinedData);
+                console.log("✅ Parsed combinedData successfully");
+            } catch (e) {
+                console.error("❌ Error parsing combinedData:", e);
+                parsedCombinedData = {};
+            }
+        }
+        
+        // ✅ FIX 2: Parse returnService if it's a string
+        let parsedReturnService = returnService;
+        if (typeof returnService === 'string') {
+            try {
+                parsedReturnService = JSON.parse(returnService);
+            } catch (e) {
+                parsedReturnService = null;
+            }
+        }
+        
+        // ✅ FIX 3: Parse paymentDetails if it's a string
+        let parsedPaymentDetails = paymentDetails;
+        if (typeof paymentDetails === 'string') {
+            try {
+                parsedPaymentDetails = JSON.parse(paymentDetails);
+            } catch (e) {
+                parsedPaymentDetails = null;
+            }
+        }
+        
+        // ✅ FIX 4: Parse billingContact if it's a string
+        let parsedBillingContact = billingContact;
+        if (typeof billingContact === 'string') {
+            try {
+                parsedBillingContact = JSON.parse(billingContact);
+            } catch (e) {
+                parsedBillingContact = null;
+            }
+        }
+
+        let finalTenantId = tenant_id || req?.tenantId || null;
+        
+        console.log("✅ Final Tenant ID in createBooking:", finalTenantId);
+
         // ================= INSERT MAIN BOOKING =================
         await queryAsync(`
-            INSERT INTO bookings (
-                bookingId, account_number, firstName, lastName, email, phone,
-                orderData, returnservice, paymentdetails, userType,
-                returnBookingId, bookActionType, billingContact
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           INSERT INTO bookings (
+    bookingId, account_number, firstName, lastName, email, phone,
+    orderData, returnservice, paymentdetails, userType,
+    returnBookingId, bookActionType, billingContact, tenant_id, orderStatus
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             bookingId,
             accountnumber,
@@ -196,43 +247,76 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
             lastName,
             email,
             phone,
-            JSON.stringify(combinedData),
-            JSON.stringify(returnService),
-            JSON.stringify(paymentDetails),
+            JSON.stringify(parsedCombinedData),
+            JSON.stringify(parsedReturnService),
+            JSON.stringify(parsedPaymentDetails),
             userType,
             returnBookingId,
             bookActionType,
-            JSON.stringify(billingContact)
+            JSON.stringify(parsedBillingContact),
+            finalTenantId,
+            'Confirmed'
         ]);
 
-        // ================= NEW: SAVE PAYMENT =================
+         
+
+        // ================= SAVE PAYMENT =================
         await savePayment({
             bookingId,
             accountnumber,
-            paymentDetails
+            paymentDetails: parsedPaymentDetails
         });
-        // ================= END NEW =================
-
 
         // ================= DATE FORMATTING =================
         const createdAt = new Date();
-        const pickUpDate = combinedData.pickUpDate;
-        const pickUpTime = combinedData.pickUpTime;
+        
+        // ✅ FIX 5: Safe access with fallback values
+        const pickUpDate = parsedCombinedData?.pickUpDate || 
+                          parsedCombinedData?.pickupdate || 
+                          new Date().toISOString().split('T')[0];
+        
+        const pickUpTime = parsedCombinedData?.pickUpTime || 
+                          parsedCombinedData?.pickupTime || 
+                          new Date().toLocaleTimeString();
+        
+        console.log("✅ pickUpDate:", pickUpDate);
+        console.log("✅ pickUpTime:", pickUpTime);
 
-        const dateParts = pickUpDate.toString().split(" ");
-        const monthMap = {
-            Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
-            Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
-        };
-
-        const formattedDate = `${monthMap[dateParts[1]]}/${dateParts[2]}/${dateParts[3]}`;
-
-        const timeStr = pickUpTime.toString().split(" ")[4];
-        const [hourStr, minuteStr] = timeStr.split(":");
-        let hour = parseInt(hourStr, 10);
-        const ampm = hour >= 12 ? "PM" : "AM";
-        hour = hour % 12 || 12;
-        const formattedTime = `${hour}:${minuteStr} ${ampm}`;
+        // ✅ FIX 6: Safe date formatting with error handling
+        let formattedDate = "";
+        let formattedTime = "";
+        
+        try {
+            const dateParts = pickUpDate.toString().split(" ");
+            const monthMap = {
+                Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+                Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12"
+            };
+            
+            if (dateParts.length >= 3 && monthMap[dateParts[1]]) {
+                formattedDate = `${monthMap[dateParts[1]]}/${dateParts[2]}/${dateParts[3]}`;
+            } else {
+                // If date is in YYYY-MM-DD format
+                const ymdParts = pickUpDate.split("-");
+                if (ymdParts.length === 3) {
+                    formattedDate = `${ymdParts[1]}/${ymdParts[2]}/${ymdParts[0]}`;
+                } else {
+                    formattedDate = pickUpDate;
+                }
+            }
+            
+            const timeStr = pickUpTime.toString().split(" ")[4] || pickUpTime;
+            const [hourStr, minuteStr] = timeStr.split(":");
+            let hour = parseInt(hourStr, 10);
+            const ampm = hour >= 12 ? "PM" : "AM";
+            hour = hour % 12 || 12;
+            formattedTime = `${hour}:${minuteStr} ${ampm}`;
+            
+        } catch (dateError) {
+            console.error("Date formatting error:", dateError);
+            formattedDate = new Date().toLocaleDateString();
+            formattedTime = new Date().toLocaleTimeString();
+        }
 
         // ================= EMAIL =================
         sendBookingEmail(
@@ -241,22 +325,22 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
             lastName,
             email,
             phone,
-            combinedData,
-            returnService,
-            paymentDetails,
+            parsedCombinedData,
+            parsedReturnService,
+            parsedPaymentDetails,
             bookActionType,
             formattedDate,
             formattedTime,
             createdAt,
             bookingTime,
-            billingContact
+            parsedBillingContact
         ).catch(console.error);
 
         // ================= RETURN SERVICE =================
         let returnServiceStatus = null;
 
-        if (returnService && returnService.returnBookingId) {
-            const returnId = returnService.returnBookingId;
+        if (parsedReturnService && parsedReturnService.returnBookingId) {
+            const returnId = parsedReturnService.returnBookingId;
 
             await queryAsync(`
                 INSERT INTO bookings (
@@ -271,22 +355,21 @@ async function handleGuestBooking(firstName, lastName, email, phone, bookingId, 
                 lastName,
                 email,
                 phone,
-                JSON.stringify(returnService),
+                JSON.stringify(parsedReturnService),
                 null,
-                JSON.stringify(paymentDetails),
+                JSON.stringify(parsedPaymentDetails),
                 userType,
                 bookingId,
                 bookActionType,
-                JSON.stringify(billingContact)
+                JSON.stringify(parsedBillingContact)
             ]);
 
-            // ================= NEW: SAVE RETURN PAYMENT =================
+            // SAVE RETURN PAYMENT
             await savePayment({
                 bookingId: returnId,
                 accountnumber,
-                paymentDetails
+                paymentDetails: parsedPaymentDetails
             });
-            // ================= END NEW =================
 
             returnServiceStatus = "Return service booking created";
         }

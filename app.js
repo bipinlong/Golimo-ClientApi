@@ -44,6 +44,8 @@ const financialRoutes = require('./routes/financialRoutes')
 const addressRoutes = require('./routes/addressRoutes')
 const accountRoutes = require('./routes/accountRoutes')
 const storedEmailRoutes = require('./routes/storedemailRoutes')
+const shuttlePricingRoutes = require('./routes/shuttlePricingRoutes')
+const serviceManagementRoutes = require('./routes/serviceManagementRoutes')
 
 app.use('/tenant', tenantLookupRoutes)
 app.use('/vehicle', vehicleRoutes)
@@ -60,6 +62,8 @@ app.use('/financial', financialRoutes)
 app.use('/address', addressRoutes)
 app.use('/account', accountRoutes)
 app.use('/stored-emails', storedEmailRoutes)
+app.use("/shuttle-pricing", shuttlePricingRoutes);
+app.use("/service-management", serviceManagementRoutes)
 
 const hostname = process.env.HOST || "0.0.0.0";
 const port = process.env.PORT || 7000;
