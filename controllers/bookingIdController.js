@@ -1,38 +1,49 @@
 const conn = require("../services/db");
 require('dotenv').config();  
 
+
 // Function to generate the unique booking ID
 exports.generateBookingId = async (req, res) => {
     try {
-        // Fetch the latest bookingId and returnBookingId from the database
-        const { lastBookingId, lastReturnBookingId } = await getLastBookingIdFromDatabase();
-
-        // Select the maximum value from both bookingId and returnBookingId
-        const bookingId = Math.max(lastBookingId, lastReturnBookingId) + 1;
-
-        // Return the newly generated booking ID as a response
-        res.status(200).json({ bookingId });
+        const query = `
+            SELECT MAX(bookingId) AS lastBookingId, MAX(returnBookingId) AS lastReturnBookingId
+            FROM bookings
+        `;
+        
+        const results = await new Promise((resolve, reject) => {
+            conn.query(query, (err, results) => {
+                if (err) {
+                    console.error("Query error:", err);
+                    reject(err);
+                } else {
+                    resolve(results);
+                }
+            });
+        });
+        
+        console.log("Raw results:", results[0]);
+        
+        // ✅ FIX: results[0] se values le
+        let lastBookingId = results[0]?.lastBookingId;
+        let lastReturnBookingId = results[0]?.lastReturnBookingId;
+        
+        // ✅ Convert to numbers
+        lastBookingId = lastBookingId ? Number(lastBookingId) : 19846000;
+        lastReturnBookingId = lastReturnBookingId ? Number(lastReturnBookingId) : 19846000;
+        
+        // ✅ Get max and add 1
+        const maxId = Math.max(lastBookingId, lastReturnBookingId);
+        const newBookingId = maxId + 1;
+        
+        console.log("Generated new bookingId:", newBookingId);
+        
+        // ✅ Return as number
+        res.status(200).json({ bookingId: newBookingId });
+        
     } catch (error) {
         console.error('Error generating booking ID:', error);
-        return res.status(500).json({ error: 'Failed to generate booking ID' });
+        // ✅ Fallback using timestamp
+        const fallbackId = Date.now();
+        res.status(200).json({ bookingId: fallbackId });
     }
-};
-
-// Helper function to get the last bookingId and returnBookingId from the database
-const getLastBookingIdFromDatabase = async () => {
-    const query = `
-        SELECT MAX(bookingId) AS lastBookingId, MAX(returnBookingId) AS lastReturnBookingId
-        FROM bookings
-    `;
-    return new Promise((resolve, reject) => {
-        conn.query(query, (err, results) => {
-            if (err) {
-                reject(err);
-            } else {
-                const lastBookingId = results[0].lastBookingId || 19846000; // Default value if no bookings exist
-                const lastReturnBookingId = results[0].lastReturnBookingId || 19846000; // Default value if no bookings exist
-                resolve({ lastBookingId, lastReturnBookingId });
-            }
-        });
-    });
 };
